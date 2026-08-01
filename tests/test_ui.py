@@ -1,5 +1,5 @@
-import pytest
 from typing import Any
+
 from vulcan.ui.controller import MockUIController
 from vulcan.ui.main_window import VulcanMainWindow
 

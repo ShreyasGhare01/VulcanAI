@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "name": "filesystem",
+  "version": "0.1.0",
+  "author": "Vulcan Core",
+  "description": "Essential skill pack containing core capabilities to browse and edit local workspace files securely.",
+  "required_permissions": [
+    "filesystem.read",
+    "filesystem.write"
+  ],
+  "dependencies": [],
+  "exposed_capabilities": [
+    "filesystem.read"
+  ],
+  "minimum_vulcan_version": "0.1.0"
+}

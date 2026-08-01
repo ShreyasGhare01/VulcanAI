@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database and log files
+vulcan/workspace/
+logs/
+*.db
+
+# OS files
+.DS_Store
+
+# Pytest and MyPy cache
+.pytest_cache/
+.mypy_cache/

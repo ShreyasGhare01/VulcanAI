@@ -2,7 +2,7 @@
 
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class AppConfig:
@@ -77,7 +77,7 @@ class VulcanConfig:
 
 
 def load_config(
-    config_dict: Optional[Dict[str, Any]] = None, config_filepath: Optional[str] = None
+    config_dict: dict[str, Any] | None = None, config_filepath: str | None = None
 ) -> VulcanConfig:
     """Loads configuration by resolving priorities:
 
@@ -104,7 +104,7 @@ def load_config(
     return config
 
 
-def _overlay_dict(config: VulcanConfig, overlay: Dict[str, Any]) -> VulcanConfig:
+def _overlay_dict(config: VulcanConfig, overlay: dict[str, Any]) -> VulcanConfig:
     """Helper to overlay standard nested dict onto the vulcan config."""
     for category, settings in overlay.items():
         if hasattr(config, category) and isinstance(settings, dict):

@@ -1,13 +1,14 @@
 """Central bootstrapping orchestrator for booting up the Vulcan AI OS system."""
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any
+
 from vulcan.config import VulcanConfig, load_config
+from vulcan.core.command_bus import CommandBus, ICommandBus
 from vulcan.core.container import IServiceContainer, ServiceContainer
 from vulcan.core.event_bus import EventBus, IEventBus
-from vulcan.core.command_bus import CommandBus, ICommandBus
-from vulcan.core.registry import CapabilityRegistry, ICapabilityRegistry
 from vulcan.core.models import Capability, CapabilityStability
+from vulcan.core.registry import CapabilityRegistry, ICapabilityRegistry
 from vulcan.events import Event
 from vulcan.utils.logging import get_logger, setup_logger
 
@@ -21,8 +22,8 @@ class Bootstrapper:
 
     def __init__(
         self,
-        config_dict: Optional[Dict[str, Any]] = None,
-        config_filepath: Optional[str] = None,
+        config_dict: dict[str, Any] | None = None,
+        config_filepath: str | None = None,
     ):
         self.config_dict = config_dict
         self.config_filepath = config_filepath

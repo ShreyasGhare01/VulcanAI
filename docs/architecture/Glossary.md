@@ -30,7 +30,12 @@ A request or instruction to perform a specific action, representing intent (*wha
 The synchronous or futures-based message routing mechanism (`CommandBus` in `vulcan/core/command_bus.py`) responsible for dispatching **Commands** to exactly one registered handler.
 
 ### Context
-A structured dictionary of key-value pairs or metadata representing the environmental state, session parameters, and background information relevant to an active execution, LLM query, or task.
+A structured, strongly-typed state object governing a specific operational scope within the OS. Vulcan defines five distinct contexts:
+*   **Conversation Context**: Manages chat sessions, active users, and token counts.
+*   **Task Context**: Controls execution priority, deadlines, and dependencies of a task.
+*   **Execution Context**: Tracks directories, environmental environment variables, and active capabilities.
+*   **Agent Context**: Handles active prompts, token budgets, and goals of an agent.
+*   **Memory Context**: Governs vector retrieval, thresholds, and active storage domains.
 
 ---
 

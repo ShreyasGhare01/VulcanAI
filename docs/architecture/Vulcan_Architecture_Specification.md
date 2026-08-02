@@ -336,7 +336,62 @@ $$\text{Defaults} \rightarrow \text{Config Files} \rightarrow \text{Environment 
 
 ---
 
-### 5.12 Logging & Life Log Subsystem (Implemented / Planned)
+### 5.12 Context Architecture (Implemented)
+Everything in an AI-native Operating System revolves around managing operational context. To support this, Vulcan introduces a strongly-typed, Pydantic-validated context subsystem in `vulcan/core/context.py` to organize parameters and boundary limits across different scopes:
+
+1.  **Conversation Context (`ConversationContext`)**: Manages chat sessions, user identifiers, last messages, active token counts, and operational metadata.
+2.  **Task Context (`TaskContext`)**: Tracks hierarchical task boundaries, execution priorities, deadlines, context dependencies, and active variable maps.
+3.  **Execution Context (`ExecutionContext`)**: Records workspace directory paths, system environment variables, loaded capabilities, and execution timeout parameters.
+4.  **Agent Context (`AgentContext`)**: Coordinates active agent persona overrides, token budgets, model configuration parameters, system prompts, and active goals.
+5.  **Memory Context (`MemoryContext`)**: Controls semantic retrieval thresholds, similarity constraints, vector search limits, scratchpad data, and active memory domains.
+
+```mermaid
+classDiagram
+    class ConversationContext {
+        +str session_id
+        +str user_id
+        +datetime started_at
+        +int active_tokens
+        +dict metadata
+    }
+    class TaskContext {
+        +str task_id
+        +str parent_task_id
+        +int priority
+        +datetime deadline
+        +list dependencies
+        +dict variables
+    }
+    class ExecutionContext {
+        +str execution_id
+        +str workspace_dir
+        +dict os_environment
+        +list loaded_capabilities
+        +int timeout_seconds
+    }
+    class AgentContext {
+        +str agent_id
+        +str role
+        +str current_persona
+        +int max_token_budget
+        +float temperature
+        +list system_prompts
+        +list active_goals
+    }
+    class MemoryContext {
+        +str session_id
+        +list active_memory_domains
+        +int vector_search_limit
+        +float similarity_threshold
+        +dict temporary_scratchpad
+    }
+```
+
+*   **Implementation Status**: Fully implemented in Phase 0 as strongly typed Pydantic models. Used by planners, agents, and coordinators to enforce bounds.
+
+---
+
+### 5.13 Logging & Life Log Subsystem (Implemented / Planned)
 *   **Application Logs**: Managed via Loguru (`vulcan/utils/logging.py`) with support for console outputs, rotating file backups, and machine-readable JSON structured logs.
 *   **Life Log (Planned)**: An architectural component separate from system debugging logs. The Life Log records structured historical milestones (such as plan generations, tool executions, and state transformations), enabling the user to audit and examine the agent's life cycle.
 *   **Implementation Status**: Loguru logger is fully implemented. The Life Log persistence system is planned for Phase 1.

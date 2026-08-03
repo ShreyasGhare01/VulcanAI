@@ -46,12 +46,30 @@ class ContextBudgetManager:
 
     def __init__(self, max_token_limit: int = 4096):
         self.max_token_limit = max_token_limit
+        self.reserved_budget = 1000  # Token buffer reserved for core system prompt segments
 
     def manage_budget(self, pieces: list[ContextPiece]) -> list[ContextPiece]:
         """Decides which context pieces fit within budget constraints based on priorities."""
-        # For Phase 1, we return all pieces, but sort them by priority_weight
+        # Sort by weight (CRITICAL is most important,BACKGROUND is least important)
         pieces.sort(key=lambda p: (p.priority_weight, p.timestamp))
-        return pieces
+
+        # Truncate lowest-priority items first if we exceed simulated max limits
+        # (This implements the requested Context Truncation and Budget Reservation)
+        allocated: list[ContextPiece] = []
+        simulated_size = 0
+        limit = self.max_token_limit - self.reserved_budget
+
+        for piece in pieces:
+            # Estimate character/token weight of this piece
+            piece_weight = len(str(piece.content)) // 4 or 1
+            if simulated_size + piece_weight <= limit:
+                allocated.append(piece)
+                simulated_size += piece_weight
+            elif piece.priority_weight <= 2:
+                # Always preserve CRITICAL and HIGH priority pieces
+                allocated.append(piece)
+
+        return allocated
 
 
 class IContextProvider(ABC):

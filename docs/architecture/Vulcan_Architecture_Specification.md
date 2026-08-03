@@ -1,7 +1,7 @@
 # Vulcan Architecture Specification (VAS)
 
-**Version:** 1.1.0
-**Applies to Vulcan Phase:** 1
+**Version:** 1.2.0
+**Applies to Vulcan Phase:** 1 Hardened Pass
 **Status:** Accepted
 **Authors:** Vulcan Core Team & Jules
 **Last Updated:** February 2025
@@ -189,6 +189,18 @@ Separates notification flows from direct instruction execution:
 *   **Handling Rule**: A Command must be routed to exactly *one* handler, which returns a response or a deferred future.
 *   **Implementation Status**: Fully integrated with domain-oriented handler mappings during Phase 1.
 
+```mermaid
+sequenceDiagram
+    participant Requester
+    participant CommandBus
+    participant Handler
+
+    Requester->>CommandBus: execute(Command("ExecuteCapability"))
+    CommandBus->>Handler: Match topic and trigger execute()
+    Handler-->>CommandBus: Return response dict
+    CommandBus-->>Requester: Return final status payload
+```
+
 ---
 
 ### 5.4 Capability Registry (Implemented)
@@ -325,6 +337,87 @@ User Input -> Session Manager -> Context Assembly -> Prompt Builder -> Inference
 ```
 *   **Context Gathering**: Orchestrates modular providers returning structured `ContextPiece` objects (Session, Application, Config, Capabilities, Identity).
 *   **Deterministic Planning Rules**: User queries are matched against heuristics (like diagnostics or empty input) first, only falling back to an LLM planner if unmatched.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Router as CognitiveRouter
+    participant Pipeline as ContextAssemblyPipeline
+    participant Prompt as PromptBuilder
+    participant LLM as IInferenceProvider
+    participant Plan as Planner
+
+    User->>Router: Send Message
+    Router->>Pipeline: Assemble context pieces
+    Pipeline-->>Router: Sorted context models
+    Router->>Prompt: Construct PromptDocument
+    Prompt-->>Router: Prompt serialization string
+    Router->>Plan: Evaluate action rules/LLM
+    Plan-->>Router: PlannerDecision
+    Router->>LLM: Generate direct response (if applicable)
+    LLM-->>Router: InferenceResponse
+    Router-->>User: Visual streamed reply update
+```
+
+#### Context Assembly Pipeline
+```mermaid
+graph TD
+    A[ContextAssemblyPipeline] --> B[SessionContextProvider]
+    A --> C[ApplicationStatusProvider]
+    A --> D[CurrentConfigurationProvider]
+    A --> E[AvailableCapabilitiesProvider]
+    A --> F[IdentityContextProvider]
+    B --> G[ContextBudgetManager]
+    C --> G
+    D --> G
+    E --> G
+    F --> G
+    G --> H[Asassembled & Sorted ContextPieces]
+```
+
+#### Prompt Builder
+```mermaid
+graph TD
+    A[PromptBuilder] --> B[Identity Section]
+    A --> C[Operating Rules Section]
+    A --> D[Session Metadata Section]
+    A --> E[System Context Section]
+    A --> F[Active Task Section]
+    A --> G[Available Capabilities Section]
+    A --> H[User Input Section]
+    B --> I[PromptDocument Serialization]
+    C --> I
+    D --> I
+    E --> I
+    F --> I
+    G --> I
+    H --> I
+```
+
+#### Conversation Lifecycle
+```mermaid
+stateDiagram-v2
+    [*] --> SessionCreated : boot()
+    SessionCreated --> Idle
+    Idle --> MessageReceived : input
+    MessageReceived --> ProcessingLoop : process_input()
+    ProcessingLoop --> TurnSaved : turn completed
+    TurnSaved --> Idle
+    SessionCreated --> SessionClosed : close()
+    SessionClosed --> [*]
+```
+
+#### Planner Routing Sequence
+```mermaid
+graph TD
+    A[User Input] --> B{Rule Engine Heuristics}
+    B -- Match Empty/Shutdown/Status --> C[Deterministic Heuristic PlannerDecision]
+    B -- Unmatched --> D{Inference Provider Online?}
+    D -- No --> E[MODEL_UNAVAILABLE Fallback]
+    D -- Yes --> F[Invoke LLM Classification Prompt]
+    F --> G[Parse Structured JSON Decisions]
+    G --> H[LLM-assisted PlannerDecision]
+```
 
 ---
 

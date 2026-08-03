@@ -24,4 +24,4 @@ def test_main_window_placeholder_initialization(qtbot: Any) -> None:
 
     assert window.windowTitle() == "VULCAN AI OPERATING SYSTEM — FOUNDATION ARCHITECTURE"
     status_msg = window.statusBar().currentMessage()
-    assert "Operating System core booted in Phase 0 Mode." in status_msg
+    assert "Operating System core booted in Phase 1 Orchestration Mode." in status_msg

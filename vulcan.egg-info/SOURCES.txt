@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 tests/test_bootstrapper.py
 tests/test_buses.py
+tests/test_context.py
 tests/test_registry_inference.py
 tests/test_skills_loader.py
 tests/test_ui.py
@@ -18,6 +19,7 @@ vulcan/core/bootstrap.py
 vulcan/core/command.py
 vulcan/core/command_bus.py
 vulcan/core/container.py
+vulcan/core/context.py
 vulcan/core/event_bus.py
 vulcan/core/exceptions.py
 vulcan/core/models.py

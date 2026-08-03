@@ -1,8 +1,8 @@
 # Vulcan Architecture Specification (VAS)
 
-**Version:** 1.0.0
-**Applies to Vulcan Phase:** 0
-**Status:** Draft
+**Version:** 1.2.0
+**Applies to Vulcan Phase:** 1 Hardened Pass
+**Status:** Accepted
 **Authors:** Vulcan Core Team & Jules
 **Last Updated:** February 2025
 
@@ -75,6 +75,7 @@ Vulcan follows a strict single root package layout under `vulcan/` as shown belo
 ├── tests/                     # Test suites (pytest, pytest-qt)
 ├── vulcan/                    # Main source package namespace
 │   ├── agents/                # Agent schemas, Planners, and Lifecycles
+│   ├── cognition/             # Cognitive Core: Pipeline, Session, Router, Planner
 │   ├── config/                # Layered configuration and override engines
 │   ├── core/                  # Service Container, Event/Command Bus, Bootstrappers, and Registries
 │   ├── events/                # Event schema definitions
@@ -182,11 +183,23 @@ sequenceDiagram
 
 ---
 
-### 5.3 Command Bus (Planned)
+### 5.3 Command Bus (Implemented)
 Separates notification flows from direct instruction execution:
-*   **Purpose**: Processes requests (intent to do work) such as `Command("Skill.Filesystem.Read")`.
+*   **Purpose**: Processes requests (intent to do work) such as `Command("ExecuteCapability")`.
 *   **Handling Rule**: A Command must be routed to exactly *one* handler, which returns a response or a deferred future.
-*   **Implementation Status**: The interface `ICommandBus` and mock components are defined in `vulcan/core/command_bus.py` during Phase 0. A fully async/parallel command routing layer is planned for Phase 1.
+*   **Implementation Status**: Fully integrated with domain-oriented handler mappings during Phase 1.
+
+```mermaid
+sequenceDiagram
+    participant Requester
+    participant CommandBus
+    participant Handler
+
+    Requester->>CommandBus: execute(Command("ExecuteCapability"))
+    CommandBus->>Handler: Match topic and trigger execute()
+    Handler-->>CommandBus: Return response dict
+    CommandBus-->>Requester: Return final status payload
+```
 
 ---
 
@@ -313,19 +326,110 @@ classDiagram
 ### 5.9 Model Provider Architecture (Implemented)
 *   **Abstraction**: Under no circumstances should the business logic interact with Ollama, OpenAI, or llama.cpp directly. Subsystems must use the `IInferenceProvider` interface.
 *   **Ollama Resilience**: The `OllamaProvider` (defined in `vulcan/services/inference.py`) utilizes `httpx` to query endpoints, parses version strings and loaded models, and performs non-blocking health checks, gracefully degrading to an offline state without causing the application to crash.
-*   **Implementation Status**: Phase 0 provides the abstract interface and a fully implemented, resilient `OllamaProvider` implementation.
+*   **Implementation Status**: Extended in Phase 1 with strongly typed `InferenceRequest` and `InferenceResponse` capabilities.
 
 ---
 
-### 5.10 UI Philosophy (Implemented)
+### 5.10 Cognitive Loop & Routing (New in Phase 1)
+All dialogue and planning flows are processed sequentially through a single authoritative pipeline (the Cognitive Loop):
+```
+User Input -> Session Manager -> Context Assembly -> Prompt Builder -> Inference Provider -> Planner -> Router -> Command Bus -> Capability -> Event Bus -> Session Update -> UI Response
+```
+*   **Context Gathering**: Orchestrates modular providers returning structured `ContextPiece` objects (Session, Application, Config, Capabilities, Identity).
+*   **Deterministic Planning Rules**: User queries are matched against heuristics (like diagnostics or empty input) first, only falling back to an LLM planner if unmatched.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Router as CognitiveRouter
+    participant Pipeline as ContextAssemblyPipeline
+    participant Prompt as PromptBuilder
+    participant LLM as IInferenceProvider
+    participant Plan as Planner
+
+    User->>Router: Send Message
+    Router->>Pipeline: Assemble context pieces
+    Pipeline-->>Router: Sorted context models
+    Router->>Prompt: Construct PromptDocument
+    Prompt-->>Router: Prompt serialization string
+    Router->>Plan: Evaluate action rules/LLM
+    Plan-->>Router: PlannerDecision
+    Router->>LLM: Generate direct response (if applicable)
+    LLM-->>Router: InferenceResponse
+    Router-->>User: Visual streamed reply update
+```
+
+#### Context Assembly Pipeline
+```mermaid
+graph TD
+    A[ContextAssemblyPipeline] --> B[SessionContextProvider]
+    A --> C[ApplicationStatusProvider]
+    A --> D[CurrentConfigurationProvider]
+    A --> E[AvailableCapabilitiesProvider]
+    A --> F[IdentityContextProvider]
+    B --> G[ContextBudgetManager]
+    C --> G
+    D --> G
+    E --> G
+    F --> G
+    G --> H[Asassembled & Sorted ContextPieces]
+```
+
+#### Prompt Builder
+```mermaid
+graph TD
+    A[PromptBuilder] --> B[Identity Section]
+    A --> C[Operating Rules Section]
+    A --> D[Session Metadata Section]
+    A --> E[System Context Section]
+    A --> F[Active Task Section]
+    A --> G[Available Capabilities Section]
+    A --> H[User Input Section]
+    B --> I[PromptDocument Serialization]
+    C --> I
+    D --> I
+    E --> I
+    F --> I
+    G --> I
+    H --> I
+```
+
+#### Conversation Lifecycle
+```mermaid
+stateDiagram-v2
+    [*] --> SessionCreated : boot()
+    SessionCreated --> Idle
+    Idle --> MessageReceived : input
+    MessageReceived --> ProcessingLoop : process_input()
+    ProcessingLoop --> TurnSaved : turn completed
+    TurnSaved --> Idle
+    SessionCreated --> SessionClosed : close()
+    SessionClosed --> [*]
+```
+
+#### Planner Routing Sequence
+```mermaid
+graph TD
+    A[User Input] --> B{Rule Engine Heuristics}
+    B -- Match Empty/Shutdown/Status --> C[Deterministic Heuristic PlannerDecision]
+    B -- Unmatched --> D{Inference Provider Online?}
+    D -- No --> E[MODEL_UNAVAILABLE Fallback]
+    D -- Yes --> F[Invoke LLM Classification Prompt]
+    F --> G[Parse Structured JSON Decisions]
+    G --> H[LLM-assisted PlannerDecision]
+```
+
+---
+
+### 5.11 UI Philosophy (Implemented)
 The Vulcan visual desktop is constructed via PySide6.
 *   **Dockable Layout Engine**: The main interface is built using `QDockWidget` objects to enable users to drag, resize, undock, and collapse specific visualization panels (such as chat, file viewer, vector monitor, and log outputs).
 *   **State Restoration**: On exit, the application saves the dock states and window geometries via Qt's native `saveState()` and `restoreState()` mechanisms, restoring the exact spatial configuration on subsequent launches.
-*   **Implementation Status**: Fully implemented in Phase 0. Tested in `tests/test_ui.py`.
+*   **Implementation Status**: Fully implemented in Phase 0. Tested in `tests/test_ui.py`. Functionalized Conversation panel and diagnostics added in Phase 1.
 
 ---
 
-### 5.11 Layered Configuration System (Implemented)
+### 5.12 Layered Configuration System (Implemented)
 Config properties are parsed and combined according to a strict priority hierarchy:
 
 $$\text{Defaults} \rightarrow \text{Config Files} \rightarrow \text{Environment Variables} \rightarrow \text{Runtime Overrides}$$
@@ -336,7 +440,7 @@ $$\text{Defaults} \rightarrow \text{Config Files} \rightarrow \text{Environment 
 
 ---
 
-### 5.12 Context Architecture (Implemented)
+### 5.13 Context Architecture (Implemented)
 Everything in an AI-native Operating System revolves around managing operational context. To support this, Vulcan introduces a strongly-typed, Pydantic-validated context subsystem in `vulcan/core/context.py` to organize parameters and boundary limits across different scopes:
 
 1.  **Conversation Context (`ConversationContext`)**: Manages chat sessions, user identifiers, last messages, active token counts, and operational metadata.
@@ -391,7 +495,7 @@ classDiagram
 
 ---
 
-### 5.13 Logging & Life Log Subsystem (Implemented / Planned)
+### 5.14 Logging & Life Log Subsystem (Implemented / Planned)
 *   **Application Logs**: Managed via Loguru (`vulcan/utils/logging.py`) with support for console outputs, rotating file backups, and machine-readable JSON structured logs.
 *   **Life Log (Planned)**: An architectural component separate from system debugging logs. The Life Log records structured historical milestones (such as plan generations, tool executions, and state transformations), enabling the user to audit and examine the agent's life cycle.
 *   **Implementation Status**: Loguru logger is fully implemented. The Life Log persistence system is planned for Phase 1.

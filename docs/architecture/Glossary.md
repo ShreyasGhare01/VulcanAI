@@ -23,6 +23,15 @@ A concrete, permission-gated functional action (such as `filesystem.read` or `fi
 ### Capability Registry
 The central, thread-safe directory (`CapabilityRegistry` in `vulcan/core/registry.py`) where all available capabilities, their input/output schemas, providers, and permissions are registered and looked up at runtime.
 
+### Cognitive Core
+The central reasoning subsystem (`vulcan/cognition/`) managing conversation history, pluggable context pipelines, prompt building, planning engines, and orchestrating the cognitive loop.
+
+### Cognitive Router (Cognitive Loop Router)
+The central traffic controller (`CognitiveRouter` in `vulcan/cognition/router.py`) orchestrating session management, context gathering, prompt assembly, planner decision evaluation, and command routing.
+
+### Cognitive Loop
+The sequential flow of cognition: User Input -> Session Manager -> Context Assembly -> Prompt Builder -> Inference Provider -> Planner -> Router -> Command Bus -> Capability -> Event Bus -> Session Update -> UI Response.
+
 ### Command
 A request or instruction to perform a specific action, representing intent (*what should happen*). Commands are routed from higher layers (Presentation/Orchestration) downward through the **Command Bus**.
 
@@ -36,6 +45,12 @@ A structured, strongly-typed state object governing a specific operational scope
 *   **Execution Context**: Tracks directories, environmental environment variables, and active capabilities.
 *   **Agent Context**: Handles active prompts, token budgets, and goals of an agent.
 *   **Memory Context**: Governs vector retrieval, thresholds, and active storage domains.
+
+### Context Provider
+An independent, modular context assembler (`IContextProvider`) that dynamically compiles structured environmental details into standardized `ContextPiece` elements.
+
+### Conversation Session
+A strongly typed, state-tracked, concurrent conversation record (`ConversationSession`) managing conversation message tracks, statistics, and execution metadata.
 
 ---
 
@@ -86,8 +101,14 @@ The central planning and control subsystem responsible for breaking down a high-
 ### Planner
 The system component (`IPlanner`) responsible for constructing a logical sequence of **Tasks** based on a user-defined objective and the current system **Context**.
 
+### Planner Decision
+A strongly typed planning choice (`PlannerDecision`) indicating whether the OS should respond directly to user dialogue, execute a system command, reject request, or ask for clarification.
+
 ### Plugin
 An extensible third-party package loaded dynamically from `vulcan/plugins/` to inject new infrastructure providers, tools, or integrations into Vulcan.
+
+### Prompt Builder
+An organized, testable assembler (`PromptBuilder` in `vulcan/cognition/prompt_builder.py`) compiling deterministically formatted LLM inputs from structured sections.
 
 ### Provider
 A concrete implementation of a service contract or capability interface (e.g., `OllamaProvider` is a model provider; `ChromaService` is a vector store provider).
@@ -102,7 +123,7 @@ A long-lived, lifecycle-managed core system component (e.g., Database, Inference
 The dependency injection container (`ServiceContainer` in `vulcan/core/container.py`) that manages the lifecycles, configuration, and resolution of core services.
 
 ### Skill
-A high-level, independent package of functionality containing a manifest, configuration, documentation, tests, and code exposing one or more **Capabilities** and **Tools** (e.g., the filesystem skill).
+ A high-level, independent package of functionality containing a manifest, configuration, documentation, tests, and code exposing one or more **Capabilities** and **Tools** (e.g., the filesystem skill).
 
 ---
 

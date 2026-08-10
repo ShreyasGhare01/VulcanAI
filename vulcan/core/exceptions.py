@@ -1,49 +1,51 @@
-"""Custom error and exception hierarchy for the Vulcan AI OS."""
+"""Custom exception hierarchy representing Vulcan AI Operating System failures."""
 
 
 class VulcanError(Exception):
-    """Base exception for all errors inside Vulcan."""
+    """Base exception for all Vulcan OS runtime and logical failures."""
 
-    pass
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
 
 
 class ConfigurationError(VulcanError):
-    """Raised when there are configuration loading or validation failures."""
+    """Raised when configuration values are missing, invalid, or corrupted."""
 
     pass
 
 
 class PluginError(VulcanError):
-    """Raised during third-party plugin installation or loading issues."""
+    """Raised when third-party plugin loading or capability execution fails."""
 
     pass
 
 
 class SkillError(VulcanError):
-    """Raised during skill validation, packaging, or execution anomalies."""
+    """Raised when skill manifests, tools, or registrations fail validation."""
 
     pass
 
 
 class MemoryError(VulcanError):
-    """Raised when underlying memory interfaces or persistent transactions fail."""
+    """Raised when memory transactions, vector retrieval, or pipeline validations fail."""
 
     pass
 
 
 class ModelError(VulcanError):
-    """Raised when LLM/Inference endpoints fail or are completely offline."""
+    """Raised when model inference endpoints are unreachable or parameters are rejected."""
 
     pass
 
 
 class AgentError(VulcanError):
-    """Raised during task scheduling or agent plan execution failures."""
+    """Raised when agent workflows, planners, or lifecycle transitions fail."""
 
     pass
 
 
 class UIError(VulcanError):
-    """Raised when visual or layout elements run into rendering problems."""
+    """Raised when presentation layer, Qt workers, or panel layout persists fail."""
 
     pass

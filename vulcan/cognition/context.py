@@ -283,3 +283,52 @@ class IdentityContextProvider(IContextProvider):
                 content=identity,
             )
         ]
+
+
+class MemoryContextProvider(IContextProvider):
+    """Contributes relevant long-term memories retrieved based on the user request."""
+
+    def __init__(self, memory_manager: Any):
+        self.memory_manager = memory_manager
+
+    @property
+    def name(self) -> str:
+        return "memory_context"
+
+    def provide_context(self, session_id: str, **kwargs: Any) -> list[ContextPiece]:
+        # Extract user input query from kwargs if provided
+        query = kwargs.get("user_input", "")
+        if not query:
+            return []
+
+        knowledge_memory = self.memory_manager.get_knowledge_memory()
+        # Retrieve relevant memories from long-term knowledge
+        results = knowledge_memory.search(query, limit=5)
+        pieces = []
+        for result in results:
+            content_desc = f"Fact: {result.candidate.title} - {result.candidate.content}"
+            # Select priority based on importance tier
+            importance = result.candidate.importance.lower().strip()
+            priority_map = {
+                "critical": ContextPriority.CRITICAL,
+                "high": ContextPriority.HIGH,
+                "medium": ContextPriority.NORMAL,
+                "low": ContextPriority.LOW,
+                "ignore": ContextPriority.BACKGROUND,
+            }
+            priority = priority_map.get(importance, ContextPriority.NORMAL)
+
+            pieces.append(
+                ContextPiece(
+                    source=self.name,
+                    type="long_term_knowledge",
+                    priority=priority,
+                    content=content_desc,
+                    metadata={
+                        "uuid": str(result.candidate.uuid),
+                        "score": result.score,
+                        "category": result.candidate.category,
+                    },
+                )
+            )
+        return pieces

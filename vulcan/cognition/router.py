@@ -1,6 +1,7 @@
 """Cognitive Router (traffic controller) managing cognitive loop orchestration and state transitions."""
 
 import time
+from typing import Any
 from uuid import uuid4
 
 from vulcan.cognition.context import ContextAssemblyPipeline
@@ -35,6 +36,7 @@ class CognitiveRouter:
         planner: Planner,
         command_bus: ICommandBus,
         event_bus: IEventBus,
+        memory_manager: Any = None,
     ):
         self.session_manager = session_manager
         self.context_pipeline = context_pipeline
@@ -43,6 +45,7 @@ class CognitiveRouter:
         self.planner = planner
         self.command_bus = command_bus
         self.event_bus = event_bus
+        self.memory_manager = memory_manager
         self.logger = get_logger("cognitive_router")
 
     def _transition_state(
@@ -225,6 +228,19 @@ class CognitiveRouter:
                 correlation_id=correlation_id,
             )
         )
+
+        # 8. Invoke Memory Council to evaluate, extract, and persist long-term memories
+        if self.memory_manager:
+            try:
+                self.logger.info("Invoking Memory Council to evaluate and extract facts...")
+                self.memory_manager.council.evaluate_and_process(
+                    session_id=session_id,
+                    user_input=user_input,
+                    assistant_response=final_assistant_text,
+                    correlation_id=correlation_id,
+                )
+            except Exception as e:
+                self.logger.error(f"Memory Council processing failed: {e}")
 
         # Transition: COMPLETED
         self._transition_state(CognitiveState.COMPLETED, session_id, correlation_id)

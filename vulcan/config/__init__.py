@@ -64,6 +64,23 @@ class ChromaConfig:
         self.collection_name: str = "vulcan_memories"
 
 
+class ObsidianConfig:
+    """Obsidian vault configuration settings."""
+
+    def __init__(self, vault_path: str = "~/.vulcan/obsidian_vault/") -> None:
+        self.vault_path: str = os.path.expanduser(vault_path)
+
+
+class MemoryRetrievalConfig:
+    """Configurable weights for multidimensional memory retrieval."""
+
+    def __init__(self) -> None:
+        self.similarity_weight: float = 0.4
+        self.recency_weight: float = 0.2
+        self.importance_weight: float = 0.2
+        self.confidence_weight: float = 0.2
+
+
 class VulcanConfig:
     """Main layered configuration container for Vulcan AI OS."""
 
@@ -74,6 +91,8 @@ class VulcanConfig:
         self.ui = UIConfig()
         self.sqlite = SQLiteConfig()
         self.chroma = ChromaConfig()
+        self.obsidian = ObsidianConfig()
+        self.retrieval = MemoryRetrievalConfig()
 
 
 def load_config(
@@ -100,6 +119,25 @@ def load_config(
     # Apply runtime configurations override
     if config_dict:
         config = _overlay_dict(config, config_dict)
+
+    # Process environment variable overrides
+    # (e.g. VULCAN_OBSIDIAN_VAULT_PATH or VULCAN_MODEL_DEFAULT_MODEL)
+    for env_key, env_val in os.environ.items():
+        if env_key.startswith("VULCAN_"):
+            parts = env_key[7:].lower().split("_")
+            if len(parts) >= 2:
+                category = parts[0]
+                field = "_".join(parts[1:])
+                if hasattr(config, category):
+                    target = getattr(config, category)
+                    if hasattr(target, field):
+                        # Convert type of env_val to match original type of default
+                        orig_val = getattr(target, field)
+                        try:
+                            converted_val = type(orig_val)(env_val)
+                            setattr(target, field, converted_val)
+                        except Exception:
+                            setattr(target, field, env_val)
 
     return config
 

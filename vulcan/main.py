@@ -12,6 +12,7 @@ from vulcan.cognition.context import (
     CurrentConfigurationProvider,
     IdentityContextProvider,
     SessionContextProvider,
+    MemoryContextProvider,
 )
 from vulcan.cognition.identity import IdentityProvider
 from vulcan.cognition.planner import Planner
@@ -55,7 +56,26 @@ def main() -> int:
     skills_loader = SkillLoader(registry=registry)
     skills_loader.discover_and_register_all()
 
-    # 5. Initialize the Cognitive Core
+    # 5. Initialize Persistent Memory Manager & Context
+    from vulcan.memory.interfaces import IMemoryManager
+    from vulcan.memory.manager import MemoryManager
+
+    memory_manager = MemoryManager(
+        config=config,
+        inference_provider=inference_provider,
+        event_bus=event_bus,
+        chroma_service=chroma_service,
+    )
+    container.register(IMemoryManager, memory_manager)
+
+    # Automatically drain pending offline memory queue at startup when Ollama is online
+    if inference_provider.is_online():
+        try:
+            memory_manager.council.process_pending_queue()
+        except Exception:
+            pass
+
+    # 6. Initialize the Cognitive Core
     session_manager = SessionManager()
     session_manager.create_session()  # Initialize first default session
 
@@ -69,6 +89,7 @@ def main() -> int:
     context_pipeline.register_provider(AvailableCapabilitiesProvider(registry))
     context_pipeline.register_provider(ActiveTaskProvider(session_manager))
     context_pipeline.register_provider(IdentityContextProvider(identity_provider))
+    context_pipeline.register_provider(MemoryContextProvider(memory_manager))
 
     prompt_builder = PromptBuilder()
     planner = Planner(inference_provider)
@@ -81,6 +102,7 @@ def main() -> int:
         planner=planner,
         command_bus=command_bus,
         event_bus=event_bus,
+        memory_manager=memory_manager,
     )
 
     # Setup core system command handlers

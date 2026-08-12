@@ -1,4 +1,4 @@
-"""Memory interfaces as defined in the architectural blueprint, including IUserMemory."""
+"""Memory interfaces as defined in the architectural blueprint."""
 
 from abc import ABC, abstractmethod
 from typing import Any
@@ -17,23 +17,10 @@ class IMemory(ABC):
         """Retrieves a piece of information by key."""
         pass
 
-
-class IIdentityMemory(IMemory, ABC):
-    """Identity memory interface, storing system identity, keys, configurations."""
-
-    pass
-
-
-class IExperienceMemory(IMemory, ABC):
-    """Experience memory interface, logging chronological historical events/timeline."""
-
-    pass
-
-
-class IKnowledgeMemory(IMemory, ABC):
-    """Knowledge memory interface, managing facts and static background information."""
-
-    pass
+    @abstractmethod
+    def delete(self, key: str, mode: str = "soft") -> None:
+        """Removes memory by unique identifier or search key with specific deletion semantics: soft, archive, permanent."""
+        pass
 
 
 class IWorkingMemory(IMemory, ABC):
@@ -42,20 +29,56 @@ class IWorkingMemory(IMemory, ABC):
     pass
 
 
+class IConversationMemory(IMemory, ABC):
+    """Conversation memory interface, storing non-permanent dialogue logs."""
+
+    @abstractmethod
+    def get_conversation_history(self, session_id: str) -> list[Any]:
+        """Retrieves the list of messages or turns for a conversation session."""
+        pass
+
+    @abstractmethod
+    def clear_conversation(self, session_id: str) -> None:
+        """Clears/archives conversation history for a session."""
+        pass
+
+
+class IKnowledgeMemory(IMemory, ABC):
+    """Long-Term Knowledge memory interface, managing structured facts and settings."""
+
+    @abstractmethod
+    def search(
+        self, query: str, limit: int = 5, filter_dict: dict[str, Any] | None = None
+    ) -> list[Any]:
+        """Performs multi-dimensional search combining similarity, recency, and metadata."""
+        pass
+
+
+class ILifeLogMemory(IMemory, ABC):
+    """Life Log memory interface, recording chronological autobiography entries of Vulcan."""
+
+    @abstractmethod
+    def log_event(
+        self,
+        subsystem: str,
+        action: str,
+        result: str,
+        summary: str,
+        correlation_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Creates a structured life log entry."""
+        pass
+
+
 class IReflectionMemory(IMemory, ABC):
-    """Reflection memory interface, holding synthesis, evaluations and summaries."""
+    """Reflection memory interface, holding synthesis, evaluations, and learned summaries."""
 
     pass
 
 
-class IDevelopmentMemory(IMemory, ABC):
-    """Development memory interface, tracking codebase structures, modules and tasks."""
-
-    pass
-
-
-class IUserMemory(IMemory, ABC):
-    """User knowledge memory interface, representing the Obsidian-backed knowledge vault."""
+class IIdentityMemory(IMemory, ABC):
+    """Identity memory interface, storing agent constitution, skills, and configuration."""
 
     pass
 
@@ -64,13 +87,13 @@ class IMemoryManager(ABC):
     """The central manager coordinating operations across all memory subsystems."""
 
     @abstractmethod
-    def get_identity_memory(self) -> IIdentityMemory:
-        """Gets Identity Memory subsystem."""
+    def get_working_memory(self) -> IWorkingMemory:
+        """Gets Working Memory subsystem."""
         pass
 
     @abstractmethod
-    def get_experience_memory(self) -> IExperienceMemory:
-        """Gets Experience Memory subsystem."""
+    def get_conversation_memory(self) -> IConversationMemory:
+        """Gets Conversation Memory subsystem."""
         pass
 
     @abstractmethod
@@ -79,8 +102,8 @@ class IMemoryManager(ABC):
         pass
 
     @abstractmethod
-    def get_working_memory(self) -> IWorkingMemory:
-        """Gets Working Memory subsystem."""
+    def get_life_log_memory(self) -> ILifeLogMemory:
+        """Gets Life Log Memory subsystem."""
         pass
 
     @abstractmethod
@@ -89,11 +112,6 @@ class IMemoryManager(ABC):
         pass
 
     @abstractmethod
-    def get_development_memory(self) -> IDevelopmentMemory:
-        """Gets Development Memory subsystem."""
-        pass
-
-    @abstractmethod
-    def get_user_memory(self) -> IUserMemory:
-        """Gets Obsidian-backed IUserMemory subsystem."""
+    def get_identity_memory(self) -> IIdentityMemory:
+        """Gets Identity Memory subsystem."""
         pass

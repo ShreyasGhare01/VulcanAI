@@ -112,7 +112,9 @@ class LifecycleMockInferenceProvider(IInferenceProvider):
         # 4. Session 2 Answer Generator
         if "What programming language do I prefer" in request.messages[-1]["content"]:
             # Ensure retrieved MemoryContextProvider piece reaches the prompt document
-            if "Python" in self.last_prompt or any(
+            # Only the system prompt counts: that is where retrieved memories are injected.
+            # Chat history from session 1 must not leak in and fake a pass.
+            if "Python" in self.last_prompt and not any(
                 "Python" in m["content"] for m in request.messages
             ):
                 return InferenceResponse(
@@ -171,7 +173,7 @@ def test_phase2_persistent_memory_acceptance(clean_test_workspace: str) -> None:
     memory_manager = MemoryManager(config, inference, event_bus, chroma)  # type: ignore
 
     session_manager = SessionManager()
-    session_1 = session_manager.create_session(active_model="qwen2.5:latest")
+    session_1 = session_manager.create_session()
 
     context_pipeline = ContextAssemblyPipeline()
     context_pipeline.register_provider(MemoryContextProvider(memory_manager))
@@ -192,6 +194,7 @@ def test_phase2_persistent_memory_acceptance(clean_test_workspace: str) -> None:
 
     # 1. Experience something & store it
     reply_1 = router.process_input("My favorite programming language is Python")
+    router.wait_for_background_tasks(timeout=30)  # Memory extraction runs after the reply.
     assert "stored in my memory" in reply_1
 
     # Check files exist
@@ -201,9 +204,11 @@ def test_phase2_persistent_memory_acceptance(clean_test_workspace: str) -> None:
     assert os.path.exists(obsidian_file)
 
     # 2. Start a clean separate Session (Cross-session recall)
-    session_2 = session_manager.create_session(active_model="qwen2.5:latest")
+    session_2 = session_manager.create_session()
     assert session_1.session_id != session_2.session_id
+    session_manager.set_active_session(session_2.session_id)
 
     # 3. Retrieve and utilize fact to construct response
     reply_2 = router.process_input("What programming language do I prefer?")
     assert "prefer Python" in reply_2
+    router.shutdown()  # Finish background memory work before the workspace is removed.

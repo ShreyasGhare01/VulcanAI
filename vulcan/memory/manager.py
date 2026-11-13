@@ -76,6 +76,8 @@ class MemoryManager(IMemoryManager):
             sqlite_repo=self.sqlite_repo,
             event_bus=event_bus,
             obsidian_vault=self.obsidian_vault,
+            model_name=config.model.default_model,
+            disable_thinking=config.model.disable_thinking,
         )
 
         # Setup Memory Council injected references

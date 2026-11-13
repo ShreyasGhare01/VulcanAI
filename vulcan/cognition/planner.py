@@ -1,14 +1,13 @@
-"""Hybrid Planning Engine evaluating user goals with rule-based and LLM-assisted models."""
+"""Rule-based planner deciding how the cognitive loop handles each message."""
 
-import json
 from typing import Any
 
 from vulcan.cognition.models import DecisionType, PlannerDecision
-from vulcan.services.inference import IInferenceProvider, InferenceRequest
+from vulcan.services.inference import IInferenceProvider
 
 
 class Planner:
-    """Evaluates objectives using deterministic heuristics first, falling back to LLM inference."""
+    """Routes messages with deterministic rules; anything unmatched is answered directly."""
 
     def __init__(self, inference_provider: IInferenceProvider):
         self.inference_provider = inference_provider
@@ -17,6 +16,7 @@ class Planner:
         self, user_input: str, capabilities: dict[str, Any] | None = None
     ) -> PlannerDecision:
         """Determines the immediate orchestrator action (DirectResponse, ExecuteCapability, etc.)."""
+        _ = capabilities  # Reserved for tool selection in the skills framework.
         # --- 1. Deterministic Rule Engine (Heuristics First) ---
         cleaned = user_input.strip()
         if not cleaned:
@@ -49,62 +49,20 @@ class Planner:
                 reasoning="Heuristic mapped user intent directly to filesystem.read.",
             )
 
-        # --- 2. Fallback to LLM Planning ---
+        # --- 2. Default: answer directly ---
+        # There is no LLM planning call: on CPU-only hardware every model call costs seconds,
+        # so each message gets exactly one (the reply). Tool selection will move into that same
+        # call via native tool calling when the skills framework lands.
         if not self.inference_provider.is_online():
             return PlannerDecision(
                 decision_type=DecisionType.MODEL_UNAVAILABLE,
                 reasoning="Local model provider is offline. Falling back gracefully.",
             )
 
-        # Let's prompt the model to return a structured planning decision in JSON
-        system_prompt = (
-            "You are Vulcan's core planning router. "
-            "Your job is to decide whether to respond directly to the user or to invoke a capability. "
-            "You MUST output raw JSON matching this structure and NO other text:\n"
-            "{\n"
-            '  "decision_type": "DirectResponse" | "ExecuteCapability" | "RequestClarification" | "RejectRequest",\n'
-            '  "reasoning": "A concise explanation of why this decision was made",\n'
-            '  "capability_name": "ExecuteCapability" or null,\n'
-            '  "arguments": {}\n'
-            "}"
+        return PlannerDecision(
+            decision_type=DecisionType.DIRECT_RESPONSE,
+            reasoning="No rule matched; answering directly.",
         )
-
-        prompt = (
-            f"User input: {cleaned}\n"
-            f"Available Capabilities: {list(capabilities.keys()) if capabilities else []}\n"
-            f"Analyze the request and return the JSON decision."
-        )
-
-        try:
-            req = InferenceRequest(
-                model="llama3:latest",
-                system_prompt=system_prompt,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,  # Highly deterministic
-            )
-            response = self.inference_provider.generate(req)
-            data = json.loads(response.assistant_message)
-
-            dtype_str = data.get("decision_type", "DirectResponse")
-            # Ensure mapped correctly to enum value
-            dtype = DecisionType.DIRECT_RESPONSE
-            for val in DecisionType:
-                if val.value == dtype_str:
-                    dtype = val
-                    break
-
-            return PlannerDecision(
-                decision_type=dtype,
-                reasoning=data.get("reasoning", "Parsed from model response."),
-                capability_name=data.get("capability_name"),
-                arguments=data.get("arguments", {}),
-            )
-        except Exception as e:
-            # Fallback to direct response if parsing or model fails
-            return PlannerDecision(
-                decision_type=DecisionType.DIRECT_RESPONSE,
-                reasoning=f"LLM Planner raised parsing error or failed: {e}. Defaulting to direct reply.",
-            )
 
 
 class MockPlanner(Planner):

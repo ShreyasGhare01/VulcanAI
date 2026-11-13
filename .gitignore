@@ -14,3 +14,6 @@ logs/
 # Pytest and MyPy cache
 .pytest_cache/
 .mypy_cache/
+
+# Build artifacts
+*.egg-info/

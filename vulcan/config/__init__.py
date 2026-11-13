@@ -33,9 +33,15 @@ class ModelConfig:
 
     def __init__(self) -> None:
         self.ollama_url: str = "http://localhost:11434"
-        self.default_model: str = "llama3:latest"
+        # Small enough to run on CPU-only hardware. Override with VULCAN_MODEL_DEFAULT_MODEL.
+        self.default_model: str = "qwen3:4b"
         self.temperature: float = 0.7
+        # Timeout for quick status calls (health checks, model lists).
         self.timeout_seconds: int = 10
+        # Timeout for generation calls. CPU inference can take minutes for long replies.
+        self.generation_timeout_seconds: int = 300
+        # Ask thinking-capable models (e.g. Qwen3) to answer directly, without a reasoning pass.
+        self.disable_thinking: bool = True
 
 
 class UIConfig:
@@ -134,7 +140,23 @@ def load_config(
                         # Convert type of env_val to match original type of default
                         orig_val = getattr(target, field)
                         try:
-                            converted_val = type(orig_val)(env_val)
+                            if isinstance(orig_val, bool):
+                                # bool("false") is True, so parse booleans explicitly.
+                                lowered = env_val.strip().lower()
+                                if lowered not in (
+                                    "1",
+                                    "true",
+                                    "yes",
+                                    "on",
+                                    "0",
+                                    "false",
+                                    "no",
+                                    "off",
+                                ):
+                                    raise ValueError(f"Not a boolean: {env_val}")
+                                converted_val: Any = lowered in ("1", "true", "yes", "on")
+                            else:
+                                converted_val = type(orig_val)(env_val)
                             setattr(target, field, converted_val)
                         except Exception:
                             setattr(target, field, env_val)

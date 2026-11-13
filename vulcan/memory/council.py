@@ -3,6 +3,7 @@
 from typing import Any
 
 from vulcan.core.event_bus import IEventBus
+from vulcan.core.exceptions import ModelError
 from vulcan.events import Event
 from vulcan.memory.models import MemoryCandidate
 from vulcan.memory.pipeline import (
@@ -25,6 +26,8 @@ class MemoryCouncil:
         sqlite_repo: SQLiteRepository,
         event_bus: IEventBus,
         obsidian_vault: Any,
+        model_name: str,
+        disable_thinking: bool = True,
     ):
         self.inference_provider = inference_provider
         self.sqlite_repo = sqlite_repo
@@ -32,9 +35,9 @@ class MemoryCouncil:
         self.logger = get_logger("memory_council")
 
         # Core Pipeline Stages
-        self.extractor = MemoryExtractor(inference_provider)
+        self.extractor = MemoryExtractor(inference_provider, model_name, disable_thinking)
         self.classifier = MemoryClassifier()
-        self.validator = MemoryValidator(inference_provider)
+        self.validator = MemoryValidator()
         self.consolidator = MemoryConsolidator(obsidian_vault)
 
         # Optional references injected by MemoryManager to prevent circular dependencies
@@ -60,17 +63,42 @@ class MemoryCouncil:
         # Graceful degradation if model is down: Queue extraction in SQLite
         if not self.inference_provider.is_online():
             self.logger.info("Ollama is offline. Queueing interaction for offline extraction.")
-            self.sqlite_repo.queue_extraction(session_id, user_input, assistant_response)
-            self.event_bus.publish(
-                Event(
-                    name="Memory.ExtractionQueued",
-                    subsystem="memory",
-                    data={"session_id": session_id, "user_input": user_input},
-                    correlation_id=correlation_id,
-                )
-            )
+            self._queue(session_id, user_input, assistant_response, correlation_id)
             return []
 
+        try:
+            return self._process_turn(session_id, user_input, assistant_response, correlation_id)
+        except ModelError as e:
+            # The model went away mid-extraction: keep the turn so it can be retried later.
+            self.logger.warning(f"Memory extraction failed ({e}). Queueing for retry.")
+            self._queue(session_id, user_input, assistant_response, correlation_id)
+            return []
+
+    def _queue(
+        self,
+        session_id: str,
+        user_input: str,
+        assistant_response: str,
+        correlation_id: str | None,
+    ) -> None:
+        self.sqlite_repo.queue_extraction(session_id, user_input, assistant_response)
+        self.event_bus.publish(
+            Event(
+                name="Memory.ExtractionQueued",
+                subsystem="memory",
+                data={"session_id": session_id, "user_input": user_input},
+                correlation_id=correlation_id,
+            )
+        )
+
+    def _process_turn(
+        self,
+        session_id: str,
+        user_input: str,
+        assistant_response: str,
+        correlation_id: str | None = None,
+    ) -> list[MemoryCandidate]:
+        """Runs the full pipeline for one turn. Raises ModelError if extraction can't run."""
         # 1. Extractor
         candidates = self.extractor.extract_candidates(
             session_id, user_input, assistant_response, correlation_id
@@ -206,11 +234,23 @@ class MemoryCouncil:
         extracted_total = []
 
         for record in pending:
-            memories = self.evaluate_and_process(
-                session_id=record["session_id"],
-                user_input=record["user_input"],
-                assistant_response=record["assistant_response"],
-            )
+            try:
+                memories = self._process_turn(
+                    session_id=record["session_id"],
+                    user_input=record["user_input"],
+                    assistant_response=record["assistant_response"],
+                )
+            except Exception as e:
+                # Leave the record queued; it will be retried on the next drain.
+                self.logger.warning(f"Pending extraction {record['id']} failed: {e}. Keeping it.")
+                self.event_bus.publish(
+                    Event(
+                        name="Memory.ExtractionFailed",
+                        subsystem="memory",
+                        data={"pending_id": record["id"], "error": str(e)},
+                    )
+                )
+                continue
             extracted_total.extend(memories)
             self.sqlite_repo.remove_pending_extraction(record["id"])
 

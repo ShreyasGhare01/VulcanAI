@@ -68,15 +68,8 @@ def main() -> int:
     )
     container.register(IMemoryManager, memory_manager)
 
-    # Automatically drain pending offline memory queue at startup when Ollama is online
-    if inference_provider.is_online():
-        try:
-            memory_manager.council.process_pending_queue()
-        except Exception:
-            pass
-
     # 6. Initialize the Cognitive Core
-    session_manager = SessionManager()
+    session_manager = SessionManager(default_model=config.model.default_model)
     session_manager.create_session()  # Initialize first default session
 
     identity_provider = IdentityProvider(config)
@@ -103,7 +96,11 @@ def main() -> int:
         command_bus=command_bus,
         event_bus=event_bus,
         memory_manager=memory_manager,
+        disable_thinking=config.model.disable_thinking,
     )
+
+    # Drain the offline memory queue in the background so startup isn't blocked by model calls.
+    cognitive_router.run_in_background(memory_manager.council.process_pending_queue)
 
     # Setup core system command handlers
     command_handler = SystemCommandHandler(command_bus, event_bus)
@@ -120,7 +117,9 @@ def main() -> int:
     window = VulcanMainWindow(controller)
     window.show()
 
-    return int(app.exec())
+    exit_code = int(app.exec())
+    cognitive_router.shutdown()  # Let in-flight memory extraction finish before exiting.
+    return exit_code
 
 
 if __name__ == "__main__":

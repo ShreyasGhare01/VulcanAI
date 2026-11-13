@@ -1,6 +1,7 @@
 """Cognitive Router (traffic controller) managing cognitive loop orchestration and state transitions."""
 
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 from uuid import uuid4
 
@@ -37,6 +38,7 @@ class CognitiveRouter:
         command_bus: ICommandBus,
         event_bus: IEventBus,
         memory_manager: Any = None,
+        disable_thinking: bool = True,
     ):
         self.session_manager = session_manager
         self.context_pipeline = context_pipeline
@@ -46,7 +48,12 @@ class CognitiveRouter:
         self.command_bus = command_bus
         self.event_bus = event_bus
         self.memory_manager = memory_manager
+        self.disable_thinking = disable_thinking
         self.logger = get_logger("cognitive_router")
+        # Memory extraction runs here, after the reply is returned, so it never delays the user.
+        # One worker keeps memory writes in order.
+        self._memory_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="memory")
+        self._memory_tasks: list[Future[Any]] = []
 
     def _transition_state(
         self, state: CognitiveState, session_id: str, correlation_id: str
@@ -92,7 +99,7 @@ class CognitiveRouter:
 
         # 2. Transition: BUILDING_CONTEXT
         self._transition_state(CognitiveState.BUILDING_CONTEXT, session_id, correlation_id)
-        context_pieces = self.context_pipeline.assemble(session_id)
+        context_pieces = self.context_pipeline.assemble(session_id, user_input=user_input)
 
         # 3. Transition: CONSTRUCTING_PROMPT
         self._transition_state(CognitiveState.CONSTRUCTING_PROMPT, session_id, correlation_id)
@@ -169,6 +176,7 @@ class CognitiveRouter:
                     system_prompt=system_instructions,
                     messages=formatted_messages,
                     temperature=0.7,
+                    think=False if self.disable_thinking else None,
                 )
 
                 response = self.inference_provider.generate(req)
@@ -229,18 +237,18 @@ class CognitiveRouter:
             )
         )
 
-        # 8. Invoke Memory Council to evaluate, extract, and persist long-term memories
+        # 8. Hand the turn to the Memory Council in the background
         if self.memory_manager:
-            try:
-                self.logger.info("Invoking Memory Council to evaluate and extract facts...")
-                self.memory_manager.council.evaluate_and_process(
-                    session_id=session_id,
-                    user_input=user_input,
-                    assistant_response=final_assistant_text,
-                    correlation_id=correlation_id,
+            self._memory_tasks = [t for t in self._memory_tasks if not t.done()]
+            self._memory_tasks.append(
+                self._memory_executor.submit(
+                    self._extract_memories,
+                    session_id,
+                    user_input,
+                    final_assistant_text,
+                    correlation_id,
                 )
-            except Exception as e:
-                self.logger.error(f"Memory Council processing failed: {e}")
+            )
 
         # Transition: COMPLETED
         self._transition_state(CognitiveState.COMPLETED, session_id, correlation_id)
@@ -249,3 +257,42 @@ class CognitiveRouter:
         self._transition_state(CognitiveState.IDLE, session_id, correlation_id)
 
         return final_assistant_text
+
+    def _extract_memories(
+        self,
+        session_id: str,
+        user_input: str,
+        assistant_response: str,
+        correlation_id: str,
+    ) -> None:
+        try:
+            self.logger.info("Invoking Memory Council to evaluate and extract facts...")
+            self.memory_manager.council.evaluate_and_process(
+                session_id=session_id,
+                user_input=user_input,
+                assistant_response=assistant_response,
+                correlation_id=correlation_id,
+            )
+        except Exception as e:
+            self.logger.error(f"Memory Council processing failed: {e}")
+
+    def run_in_background(self, fn: Any) -> None:
+        """Runs fn on the memory worker, after any memory work already queued."""
+
+        def guarded() -> None:
+            try:
+                fn()
+            except Exception as e:
+                self.logger.error(f"Background memory task failed: {e}")
+
+        self._memory_tasks.append(self._memory_executor.submit(guarded))
+
+    def wait_for_background_tasks(self, timeout: float | None = None) -> None:
+        """Blocks until queued memory extraction has finished (used by tests and shutdown)."""
+        for task in list(self._memory_tasks):
+            task.result(timeout=timeout)
+        self._memory_tasks = [t for t in self._memory_tasks if not t.done()]
+
+    def shutdown(self) -> None:
+        """Finishes pending memory work and stops the background worker."""
+        self._memory_executor.shutdown(wait=True)

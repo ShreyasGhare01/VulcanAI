@@ -7,6 +7,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from vulcan.cognition.models import ConversationTurn, Message
+from vulcan.config import ModelConfig
 
 
 class ConversationSession(BaseModel):
@@ -18,7 +19,7 @@ class ConversationSession(BaseModel):
     history: list[Message] = Field(default_factory=list)
     turns: list[ConversationTurn] = Field(default_factory=list)
     system_prompt: str | None = None
-    active_model: str = "llama3:latest"
+    active_model: str = Field(default_factory=lambda: ModelConfig().default_model)
     active_task: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -51,7 +52,8 @@ class ConversationSession(BaseModel):
 class SessionManager:
     """Manages active conversation sessions."""
 
-    def __init__(self) -> None:
+    def __init__(self, default_model: str | None = None) -> None:
+        self.default_model = default_model or ModelConfig().default_model
         self._sessions: dict[str, ConversationSession] = {}
         self._active_session_id: str | None = None
 
@@ -59,14 +61,14 @@ class SessionManager:
         self,
         session_id: str | None = None,
         system_prompt: str | None = None,
-        active_model: str = "llama3:latest",
+        active_model: str | None = None,
     ) -> ConversationSession:
         """Creates and tracks a new session."""
         sid = session_id or str(uuid4())
         session = ConversationSession(
             session_id=sid,
             system_prompt=system_prompt,
-            active_model=active_model,
+            active_model=active_model or self.default_model,
         )
         self._sessions[sid] = session
         if not self._active_session_id:

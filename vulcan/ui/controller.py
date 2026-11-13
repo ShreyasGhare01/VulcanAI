@@ -138,7 +138,7 @@ class MockUIController:
         return {
             "status": "Offline",
             "active_provider": "Ollama",
-            "loaded_model": "llama3:latest",
+            "loaded_model": "mock-model",
             "latency": "0.0 ms",
             "token_usage": "0",
             "installed_count": 0,

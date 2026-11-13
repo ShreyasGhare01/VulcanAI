@@ -11,8 +11,15 @@ from vulcan.utils.logging import get_logger
 class MemoryExtractor:
     """Uses LLM to evaluate conversation turns and extract structured facts/candidates."""
 
-    def __init__(self, inference_provider: IInferenceProvider):
+    def __init__(
+        self,
+        inference_provider: IInferenceProvider,
+        model_name: str,
+        disable_thinking: bool = True,
+    ):
         self.inference_provider = inference_provider
+        self.model_name = model_name
+        self.disable_thinking = disable_thinking
         self.logger = get_logger("memory_extractor")
 
     def extract_candidates(
@@ -22,10 +29,12 @@ class MemoryExtractor:
         assistant_response: str,
         correlation_id: str | None = None,
     ) -> list[MemoryCandidate]:
-        """Identifies if dialogue contains structured knowledge worth remembering."""
-        if not self.inference_provider.is_online():
-            self.logger.warning("Inference provider offline. Skipping extraction.")
-            return []
+        """Identifies if dialogue contains structured knowledge worth remembering.
+
+        Raises ModelError when the model can't be reached, so the caller can keep the turn
+        queued and retry later. A reply that isn't valid JSON is logged and treated as
+        "nothing to remember", since retrying would most likely produce the same output.
+        """
 
         prompt = f"""
         Analyze the following user-assistant turn to see if the user shared any permanent factual knowledge, preference, career goal, schedule, or project detail worth remembering.
@@ -46,14 +55,17 @@ class MemoryExtractor:
         Do not include any Markdown wrapper, preamble or explanation. Output strict raw JSON.
         """
 
+        req = InferenceRequest(
+            model=self.model_name,
+            system_prompt="You are Vulcan's Memory Extractor. You extract structured knowledge facts.",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+            think=False if self.disable_thinking else None,
+        )
+        # Let ModelError propagate: the turn must stay queued rather than be lost.
+        response = self.inference_provider.generate(req)
+
         try:
-            req = InferenceRequest(
-                model="llama3:latest",
-                system_prompt="You are Vulcan's Memory Extractor. You extract structured knowledge facts.",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-            )
-            response = self.inference_provider.generate(req)
             raw_text = response.assistant_message.strip()
 
             # Clean JSON markdown wrapper if LLM returned it
@@ -115,10 +127,12 @@ class MemoryClassifier:
 
 
 class MemoryValidator:
-    """Assigns memory importance and confidence scores based on phrasing and structures."""
+    """Assigns memory importance and confidence scores based on phrasing and structures.
 
-    def __init__(self, inference_provider: IInferenceProvider):
-        self.inference_provider = inference_provider
+    Heuristic only: a model call per extracted fact is too slow on CPU-only hardware.
+    """
+
+    def __init__(self) -> None:
         self.logger = get_logger("memory_validator")
 
     def validate(self, candidate: MemoryCandidate) -> MemoryCandidate:
@@ -147,50 +161,6 @@ class MemoryValidator:
             candidate.importance = "ignore"
         else:
             candidate.importance = "medium"
-
-        # If LLM is available, perform a finer evaluation
-        if self.inference_provider.is_online():
-            try:
-                prompt = f"""
-                As Vulcan's Memory Validator, evaluate this memory candidate:
-                Title: "{candidate.title}"
-                Content: "{candidate.content}"
-
-                Determine the exact confidence score (from 0.0 to 1.0) and importance tier ('critical', 'high', 'medium', 'low', 'ignore').
-                - Confidence is high (e.g. 0.95) if asserted as a direct fact ("I major in Biomedical Engineering"). It is lower (e.g. 0.60) if tentative ("I think I might switch").
-                - Importance:
-                  * 'critical' for high-impact personal identifiers (birthdays, family names).
-                  * 'high' for standard workspace and professional preferences (favorite IDE, career goals, university).
-                  * 'medium' for regular knowledge facts (project usage, specific packages).
-                  * 'low' for transient facts.
-                  * 'ignore' for trivial chat filler (e.g., eating lunch).
-
-                Return raw JSON ONLY:
-                {{
-                  "importance": "tier",
-                  "confidence": 0.XX
-                }}
-                Do not include markdown blocks or preambles.
-                """
-                req = InferenceRequest(
-                    model="llama3:latest",
-                    system_prompt="You determine confidence and importance metrics for memories.",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.1,
-                )
-                response = self.inference_provider.generate(req)
-                raw_text = response.assistant_message.strip()
-
-                if raw_text.startswith("```json"):
-                    raw_text = raw_text.split("```json", 1)[1].rsplit("```", 1)[0].strip()
-                elif raw_text.startswith("```"):
-                    raw_text = raw_text.split("```", 1)[1].rsplit("```", 1)[0].strip()
-
-                metrics = json.loads(raw_text)
-                candidate.importance = metrics.get("importance", candidate.importance)
-                candidate.confidence = float(metrics.get("confidence", candidate.confidence))
-            except Exception as e:
-                self.logger.warning(f"Failed to run LLM memory validation: {e}. Using heuristics.")
 
         return candidate
 

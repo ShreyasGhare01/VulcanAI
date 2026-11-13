@@ -231,8 +231,7 @@ def test_memory_pipeline_stages() -> None:
     assert classified.category == "fact"  # Default fallback normalization
 
     # Validator (Heuristics)
-    mock_inference = MockInferenceProvider(online=False)  # Force heuristics fallback
-    validator = MemoryValidator(mock_inference)
+    validator = MemoryValidator()
     cand2 = MemoryCandidate(
         memory_type="knowledge",
         category="preference",

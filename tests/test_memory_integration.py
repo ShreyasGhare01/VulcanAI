@@ -114,7 +114,9 @@ class LifecycleMockInferenceProvider(IInferenceProvider):
         # Session 2 conversational reply (where it should answer based on injected memory context)
         if "What programming language do I prefer" in request.messages[-1]["content"]:
             # Check if Python is injected in system prompts/context messages
-            if "Python" in self.last_prompt or any(
+            # Only the system prompt counts: that is where retrieved memories are injected.
+            # Chat history from session 1 must not leak in and fake a pass.
+            if "Python" in self.last_prompt and not any(
                 "Python" in m["content"] for m in request.messages
             ):
                 return InferenceResponse(
@@ -173,7 +175,7 @@ def test_complete_cognitive_memory_lifecycle(clean_workspace: str) -> None:
     memory_manager = MemoryManager(config, inference, event_bus, chroma)  # type: ignore
 
     session_manager = SessionManager()
-    session = session_manager.create_session(active_model="llama3:latest")
+    session = session_manager.create_session()
 
     context_pipeline = ContextAssemblyPipeline()
     # Register our new MemoryContextProvider
@@ -198,6 +200,7 @@ def test_complete_cognitive_memory_lifecycle(clean_workspace: str) -> None:
     # ==================== SESSION 1: SAVING MEMORY ====================
     user_input_1 = "My favorite programming language is Python"
     reply_1 = router.process_input(user_input_1)
+    router.wait_for_background_tasks(timeout=30)  # Memory extraction runs after the reply.
 
     assert "I will remember that Python is your favorite" in reply_1
 
@@ -223,8 +226,9 @@ def test_complete_cognitive_memory_lifecycle(clean_workspace: str) -> None:
 
     # ==================== SESSION 2: RETRIEVING MEMORY ====================
     # Start a brand new clean session to verify persistent recall across sessions!
-    session_2 = session_manager.create_session(active_model="llama3:latest")
+    session_2 = session_manager.create_session()
     assert session_2.session_id != session.session_id
+    session_manager.set_active_session(session_2.session_id)
 
     # The user asks about their preference
     user_input_2 = "What programming language do I prefer?"
@@ -238,3 +242,4 @@ def test_complete_cognitive_memory_lifecycle(clean_workspace: str) -> None:
     # Run loop for session 2
     reply_2 = router.process_input(user_input_2)
     assert "you prefer Python" in reply_2
+    router.shutdown()  # Finish background memory work before the workspace is removed.

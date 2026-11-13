@@ -47,6 +47,8 @@ class InferenceRequest(BaseModel):
     stop: list[str] | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     stream: bool = False
+    # None leaves the model's default. False asks thinking models to skip their reasoning pass.
+    think: bool | None = None
 
 
 class InferenceResponse(BaseModel):
@@ -113,6 +115,9 @@ class OllamaProvider(LifecycleService, IInferenceProvider):
         super().__init__()
         self.base_url = config.ollama_url.rstrip("/")
         self.timeout = config.timeout_seconds
+        self.generation_timeout = httpx.Timeout(
+            config.generation_timeout_seconds, connect=config.timeout_seconds
+        )
         self.logger = get_logger("ollama_provider")
 
     def _get(self, endpoint: str) -> httpx.Response | None:
@@ -226,13 +231,20 @@ class OllamaProvider(LifecycleService, IInferenceProvider):
         if request.stop is not None:
             options["stop"] = request.stop
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": request.model,
             "messages": ollama_messages,
             "stream": request.stream,
             "options": options,
         }
+        if request.think is not None:
+            payload["think"] = request.think
         return payload
+
+    @staticmethod
+    def _rejected_think(status_code: int, body: str) -> bool:
+        """True when Ollama refused the request only because the model has no thinking mode."""
+        return status_code == 400 and "think" in body.lower()
 
     def generate(self, request: InferenceRequest) -> InferenceResponse:
         """Executes a non-streaming chat request against Ollama's /api/chat."""
@@ -250,8 +262,11 @@ class OllamaProvider(LifecycleService, IInferenceProvider):
         payload["stream"] = False
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.generation_timeout) as client:
                 resp = client.post(url, json=payload)
+                if "think" in payload and self._rejected_think(resp.status_code, resp.text):
+                    payload.pop("think")
+                    resp = client.post(url, json=payload)
                 if resp.status_code != 200:
                     from vulcan.core.exceptions import ModelError
 
@@ -292,14 +307,13 @@ class OllamaProvider(LifecycleService, IInferenceProvider):
 
     def stream(self, request: InferenceRequest) -> Iterator[InferenceStreamChunk]:
         """Executes a streaming chat request against Ollama's /api/chat."""
-        import json
         import time
+
+        from vulcan.core.exceptions import ModelError
 
         start_time = time.perf_counter()
 
         if not self.is_online():
-            from vulcan.core.exceptions import ModelError
-
             raise ModelError("Ollama local service is offline.")
 
         url = f"{self.base_url}/api/chat"
@@ -307,51 +321,61 @@ class OllamaProvider(LifecycleService, IInferenceProvider):
         payload["stream"] = True
 
         try:
-            # We use a custom stream client to retrieve line by line chunks
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.generation_timeout) as client:
                 with client.stream("POST", url, json=payload) as r:
-                    if r.status_code != 200:
-                        from vulcan.core.exceptions import ModelError
-
+                    if r.status_code == 200:
+                        yield from self._iter_stream_chunks(r, start_time)
+                        return
+                    r.read()
+                    if not ("think" in payload and self._rejected_think(r.status_code, r.text)):
                         raise ModelError(f"Ollama stream returned status code {r.status_code}")
 
-                    for line in r.iter_lines():
-                        if not line:
-                            continue
-                        try:
-                            data = json.loads(line)
-                            content = data.get("message", {}).get("content", "")
-                            done = data.get("done", False)
-
-                            metrics = None
-                            if done:
-                                latency_ms = (time.perf_counter() - start_time) * 1000.0
-                                prompt_eval_count = data.get("prompt_eval_count", 0)
-                                eval_count = data.get("eval_count", 0)
-                                eval_duration_ns = data.get("eval_duration", 0)
-
-                                metrics = InferenceMetrics(
-                                    prompt_tokens=prompt_eval_count,
-                                    completion_tokens=eval_count,
-                                    total_tokens=prompt_eval_count + eval_count,
-                                    latency_ms=latency_ms,
-                                    inference_duration_ms=(
-                                        eval_duration_ns / 1_000_000.0
-                                        if eval_duration_ns
-                                        else latency_ms
-                                    ),
-                                )
-
-                            yield InferenceStreamChunk(
-                                content=content,
-                                finish_reason="stop" if done else None,
-                                metrics=metrics,
-                                raw_provider_metadata=data,
-                            )
-                        except json.JSONDecodeError:
-                            continue
+                # The model has no thinking mode; Ollama rejected the flag before generating.
+                payload.pop("think")
+                with client.stream("POST", url, json=payload) as r:
+                    if r.status_code != 200:
+                        raise ModelError(f"Ollama stream returned status code {r.status_code}")
+                    yield from self._iter_stream_chunks(r, start_time)
         except Exception as e:
-            from vulcan.core.exceptions import ModelError
-
             self.logger.error(f"Ollama stream generation failed: {e}")
             raise ModelError(f"Ollama stream inference failure: {e}") from e
+
+    def _iter_stream_chunks(
+        self, response: httpx.Response, start_time: float
+    ) -> Iterator[InferenceStreamChunk]:
+        """Parses Ollama's newline-delimited JSON stream into typed chunks."""
+        import json
+        import time
+
+        for line in response.iter_lines():
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            content = data.get("message", {}).get("content", "")
+            done = data.get("done", False)
+
+            metrics = None
+            if done:
+                prompt_eval_count = data.get("prompt_eval_count", 0)
+                eval_count = data.get("eval_count", 0)
+                eval_duration_ns = data.get("eval_duration", 0)
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                metrics = InferenceMetrics(
+                    prompt_tokens=prompt_eval_count,
+                    completion_tokens=eval_count,
+                    total_tokens=prompt_eval_count + eval_count,
+                    latency_ms=latency_ms,
+                    inference_duration_ms=(
+                        eval_duration_ns / 1_000_000.0 if eval_duration_ns else latency_ms
+                    ),
+                )
+
+            yield InferenceStreamChunk(
+                content=content,
+                finish_reason="stop" if done else None,
+                metrics=metrics,
+                raw_provider_metadata=data,
+            )
